@@ -1,0 +1,122 @@
+version: '3.5'
+services:
+  # broker MQTT eclipse-mosquitto.
+  mosquitto:
+    build:
+      context: ./mosquitto  # indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    env_file:
+      - ./mosquitto/environment.env # archivo con las variables de entorno usuario/password. Editarlo para configurar.
+
+    image: eclipse-mosquitto  # Este es el nombre de la imagen que genera el build.
+
+    container_name: eclipse-mosquitto # Nombre del contenedor que creará el servicio.
+
+    restart: always   # Que siempre se reinicie.
+
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquito.conf:ro   # Volumen bind para el archivo de configuración.
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+    ports:
+      - 1883:1883
+
+    networks:
+      - container-network
+
+  # node-red
+  node-red:
+    build:
+      context: ./node-red  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: node-red # Este es el nombre de la imagen que genera el build.
+
+    container_name: node-red  # Nombre del contenedor que creará el servicio.
+
+    restart: always    # Que siempre se reinicie.
+
+    ports:
+      - 1880:1880
+
+    volumes:
+      - node-red-data:/data
+
+    networks:
+      - container-network
+
+    depends_on:
+      - mosquitto
+
+
+  # nginx-reverse-proxy
+  nginx-reverse-proxy:
+    build:
+      context: ./nginx-reverse-proxy  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: nginx-reverse-proxy  # Este es el nombre de la imagen que genera el build.
+
+    container_name: nginx-reverse-proxy  # Nombre del contenedor que creará el servicio.
+
+    restart: always  # Que siempre se reinicie.
+
+    ports:
+      - 80:80
+      - 443:443
+
+    networks:
+      - container-network
+
+    volumes:
+      - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt/:/etc/letsencrypt/
+
+    depends_on:
+      - node-red
+
+  # ddclient (Cliente de DynDns)
+  #ddclient:
+  #  image: linuxserver/ddclient
+  #
+  #  container_name: ddclient
+  #
+  #  environment:
+  #    - PUID=1000
+  #    - PGID=1000
+  #    - TZ=Europe/Madrid
+  #
+  #  restart: always   # Que siempre se reinicie.
+  #
+  #  volumes:
+  #    - ./ddclient:/config:ro   # Volumen bind para el archivo de configuración.
+  #
+  #  networks:
+  #    - container-network
+  
+
+  # updater_public_ip
+  updater_public_ip:
+    build:
+      context: ./updateDNSAzureFunctions
+
+    env_file:
+      - ./updateDNSAzureFunctions/environment.env # archivo con las variables de entorno. Editarlo para configurar.
+
+    image: antsala/updater_public_ip 
+
+    container_name: updater
+
+    restart:  always
+
+    networks:
+      - container-network
+
+
+networks:
+  container-network:
+    name: the-container-network
+    driver: bridge
+
+volumes:
+    node-red-data:
+      name: the-node-red-data

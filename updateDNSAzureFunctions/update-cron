@@ -1,0 +1,3 @@
+0 * * * * . /cron_env.sh; /update_public_ip.sh >> /cron.log 2>&1
+# An empty line is required at the end of this file for a valid cron file.
+
