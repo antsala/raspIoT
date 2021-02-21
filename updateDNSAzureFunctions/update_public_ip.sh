@@ -14,7 +14,11 @@ export URI="$URL?code=$CODE&name=$NAME&zone=$ZONE&reqIP=$REQIP"
 
 echo "$URI"
 
+date
 curl -X POST $URI -d "" 
+
+echo
+echo
 
 exec "$@"
 
