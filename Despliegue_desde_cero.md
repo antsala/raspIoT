@@ -696,12 +696,8 @@ sudo docker-compose down
 Vamos a crear el certificado. Se pueden crear certificados para diferentes URL, para ello repetir el parámetro ***-d*** por cada una de ellas.   
 (Nota: Seguir las instrucciones)
 ```
-sudo certbot certonly --standalone -d ponerladnscorrecta.dyndns.org
+sudo certbot certonly --standalone -d <sevilla.antsala.xyz>
 ```
-	
-Observemos la ruta donde se guardan los archivos ***pem***. Luego hará falta usarlas.
-
-![Ruta pem](./img/202212222104.png)
 	
 La autoridad certificadora de Let's Encrypt entrega certificados de corta vida, solo son válidos por 90 días. Esto hace que sea importante el proceso de renovación automático. Certbot lo hace fácil por medio del comando ***certbot renew***, que comprueba los certificados instalados y renueva aquellos que expirarán en menos de 30 días.
 
@@ -744,7 +740,7 @@ sudo nano nginx-reverse-proxy/nginx.conf
 ```
 
 Debe quedar de la siguiente forma.
-(Nota: Sustituir el anterior)
+(Nota: Sustituir el anterior y actualizar ***<poner_la_dns_correcta>***
 ```
 worker_processes 1;
 
@@ -758,8 +754,8 @@ http {
         listen 80;
 
         listen 443 ssl;
-        ssl_certificate /etc/letsencrypt/live/ponerladnscorrecta.dyndns.org/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/ponerladnscorrecta.dyndns.org/privkey.pem;
+        ssl_certificate /etc/letsencrypt/live/<poner_la_dns_correcta>/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/<poner_la_dns_correcta>/privkey.pem;
 
         location / {
             proxy_ssl_session_reuse         on;
@@ -779,7 +775,7 @@ Arrancamos nuestro stack
 sudo docker-compose up -d
 ```
 
-Conectamos con un navegador a https://ponerladnscorrecta.dyndns.org/ui y vemos si funciona.
+Conectamos con un navegador a https://<poner_la_dns_correcta>/ui y vemos si funciona.
 
 
 
