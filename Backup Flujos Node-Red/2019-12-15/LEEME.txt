@@ -1,0 +1,7 @@
+En Manage Palette, añadir: node-red-dashboard, node-red-contrib-alexa-home-skill (la credencial para conectar el nodo es antsala/P6cVe54KbH79Ha9
+
+Leds Acuario. NODEMCU-20181021. Basado en Proyecto Control Tira de Leds/Firmware V1.0
+Luz Acuario. NODEMCU-20190307. Basado en Proyecto Sonoff-NodeMCU/Firmware V1.0
+Encendido Remoto. NODEMCU-20190202. Basado en Proyecto Encendido Remoto/Firmware V2.0
+Arbol Navidad. NODEMCU-20191215. Basado en Proyecto Sonoff-NodeMCU/Firmware V1.0
+
