@@ -309,3 +309,272 @@ Podemos ver la salida del log:
 docker-compose logs
 ```
 	
+# SERVICIO NGINX
+
+Creamos un directorio de contexto para ***NGINX***.
+```
+sudo mkdir $HOME/nginx-reverse-proxy
+```
+
+Y creamos y editamos el archivo de configuración de nginx
+```
+sudo nano $HOME/nginx-reverse-proxy/nginx.conf
+```
+
+Pegamos el siguiente texto
+```
+worker_processes 1;
+
+events { worker_connections 1024; }
+
+http {
+
+    sendfile on;
+
+    server {
+        listen 80;
+
+        location / {
+            proxy_ssl_session_reuse  on;
+            proxy_pass               http://node-red:1880;  #  Aprovechamos la resolución de nombres de contenedores que proporciona la red de tipo bridge.
+            proxy_http_version       1.1;
+            proxy_set_header         Upgrade        $http_upgrade;
+            proxy_set_header         Connection     "upgrade";
+            proxy_redirect           default;
+            proxy_read_timeout       90;
+        }
+    }
+}
+```
+
+Editamos el Dockerfile de nginx.
+```
+sudo nano $HOME/nginx-reverse-proxy/Dockerfile
+```
+
+Pegamos el siguiente texto.
+```
+FROM nginx:alpine
+```
+
+Guardamos (Ctrl+X, Y, Enter)
+
+Editamos ***docker-compose.yml*** para añadir el servicio de nginx.
+
+```
+sudo nano docker-compose.yml
+```
+	
+Pegar el siguiente texto. Sustutir todo el archivo por este.
+(Nota: Se han añadido cláusulas ***depends_on*** a lo servicios anteriores)
+```
+version: '3.5'
+
+services:
+
+    # broker MQTT eclipse-mosquitto.
+    mosquitto:
+    build:
+        context: ./mosquitto  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    env_file:
+        - ./mosquitto/environment.env # Archivo con las variables de entorno usuario/password. Editarlo para configurar.
+
+    image: eclipse-mosquitto  # Este es el nombre de la imagen que genera el build.
+
+    container_name: eclipse-mosquitto # Nombre del contenedor que creará el servicio.
+
+    restart: always   # Que siempre se reinicie.
+
+    volumes:
+        - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquito.conf:ro   # Volumen bind para el archivo de configuración.
+        - ./mosquitto/data:/mosquitto/data
+        - ./mosquitto/log:/mosquitto/log
+
+    ports:
+        - 1883:1883
+
+    # node-red
+    node-red:
+    build:
+        context: ./node-red  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: node-red  # Este es el nombre de la imagen que genera el build.
+
+    container_name: node-red  # Nombre del contenedor que creará el servicio.
+
+    restart: always    # Que siempre se reinicie.
+
+    ports:
+        - 1880:1880
+
+    volumes:
+        - node-red-data:/data  # Ofrecemos persistencia de la configuración de node-red.
+
+    depends_on:
+        - mosquitto
+
+
+    # nginx-reverse-proxy
+    nginx-reverse-proxy:
+    build:
+        context: ./nginx-reverse-proxy  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: nginx-reverse-proxy  # Este es el nombre de la imagen que genera el build.
+
+    container_name: nginx-reverse-proxy  # Nombre del contenedor que creará el servicio.
+
+    restart: always  # Que siempre se reinicie.
+
+    ports:
+        - 80:80
+        - 443:443
+
+    volumes:
+        - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+
+    depends_on:
+        - node-red
+
+volumes:
+    node-red-data:
+    name: the-node-red-data
+```
+	
+Compilamos.
+```
+docker-compose build
+```
+	
+Levantamos los servicios
+```
+docker-compose up -d
+```
+	
+Comprobamos que vaya todo bien
+```
+docker container ls
+```	
+	
+Creamos una red personalizada en Compose para que haya resolución DNS. 
+
+Editar el ***docker-compose.yml***.
+```
+sudo nano $HOME/docker-compose.yml
+```
+
+Pegar el siguiente texto (se ha añadido un objeto network al final y los contenedores hacen referencia a esta red). 
+(Nota: Sustituir todo el contenido por este)
+```
+version: '3.5'
+
+services:
+
+    # broker MQTT eclipse-mosquitto.
+    mosquitto:
+    build:
+        context: ./mosquitto  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    env_file:
+        - ./mosquitto/environment.env # Archivo con las variables de entorno usuario/password. Editarlo para configurar.
+
+    image: eclipse-mosquitto  # Este es el nombre de la imagen que genera el build.
+
+    container_name: eclipse-mosquitto # Nombre del contenedor que creará el servicio.
+
+    restart: always   # Que siempre se reinicie.
+
+    volumes:
+        - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquito.conf:ro   # Volumen bind para el archivo de configuración.
+        - ./mosquitto/data:/mosquitto/data
+        - ./mosquitto/log:/mosquitto/log
+
+    ports:
+        - 1883:1883
+
+    networks:
+        - container-network
+
+
+    
+    # node-red
+    node-red:
+    build:
+        context: ./node-red  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: node-red  # Este es el nombre de la imagen que genera el build.
+
+    container_name: node-red  # Nombre del contenedor que creará el servicio.
+
+    restart: always    # Que siempre se reinicie.
+
+    ports:
+        - 1880:1880
+
+    volumes:
+        - node-red-data:/data
+
+    networks:
+        - container-network
+
+    depends_on:
+        - mosquitto
+
+    # nginx-reverse-proxy
+    nginx-reverse-proxy:
+    build:
+        context: ./nginx-reverse-proxy  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: nginx-reverse-proxy  # Este es el nombre de la imagen que genera el build.
+
+    container_name: nginx-reverse-proxy  # Nombre del contenedor que creará el servicio.
+
+    restart: always  # Que siempre se reinicie.
+
+    ports:
+        - 80:80
+        - 443:443
+
+    networks:
+        - container-network
+
+    volumes:
+        - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+
+    depends_on:
+        - node-red
+
+networks:
+    container-network:
+    name: the-container-network
+    driver: bridge
+
+volumes:
+    node-red-data:
+    name: the-node-red-data
+```
+	
+Actualizamos el servicio:
+```
+docker-compose up -d
+```
+	
+Para comprobar si nginx está corriendo, nos conectamos con un navegador a http://192.168.1.200:80, debe aparecer la página de nodered.
+	
+	
+Ahora hay que cargar los flujos en node-red. Pero antes hay que administrar la paleta (manage-pallete) de nodos y añadir los siguientes
+```
+node-red-dashboard, node-red-contrib-alexa-home-skill
+```
+
+![Añadir nodos](./img/202212222049.png)
+
+
+Importar los flujos en node-red.
+(Nota: Los backups de los flujos están el la carpeta ***Backup Flujos Node-Red*** del repositorio)
+(Nota: La importación de los flujos se hace desde la página web de nodered)
+
+![Importar flujos](./img/202212222051.png)
+
+
+
