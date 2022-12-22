@@ -114,6 +114,38 @@ Probar docker
 docker run --rm hello-world
 ```
 
+## Clonado del repo en la pi y creación del stack.
+
+Este repositorio contiene todos los archivos para desplegar la infraestructura, así que en la pi, el la carpeta ***/home/pi*** (debemos estar en ella) escribimos.
+```
+git clone https://github.com/antsala/raspIoT.git
+```
+
+Lanzamos la aplicación.
+```
+cd $HOME
+```
+
+Se ejecuta la sección "build" de "docker-compose.yml", que generará las imágenes.
+```
+docker-compose build  
+```
+
+Crea el stack o pila se servicios.
+```
+docker-compose up -d  
+```
+
+Muestra los contenedores levantados. La infraestructura debe esta levantada.
+```
+docker container ls   
+```
+
+Si quieres ver como se generan desde cero todo, o entender al detalle cómo funciona, mira el archivo ***Despliegue_desde_cero.md***
+
+
+
+
 	
 
 
