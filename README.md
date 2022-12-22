@@ -111,7 +111,7 @@ sudo pip install docker-compose
 	
 Probar docker
 ```	
-docker run -rm hello-world
+docker run --rm hello-world
 ```
 
 	
