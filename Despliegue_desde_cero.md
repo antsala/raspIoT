@@ -572,9 +572,215 @@ node-red-dashboard, node-red-contrib-alexa-home-skill
 
 Importar los flujos en node-red.
 (Nota: Los backups de los flujos están el la carpeta ***Backup Flujos Node-Red*** del repositorio)
-(Nota: La importación de los flujos se hace desde la página web de nodered)
+(Nota: La importación de los flujos se hace desde la página de edición de nodered: http://192.168.1.200:1880/)
 
 ![Importar flujos](./img/202212222051.png)
 
+Los flujos se han importado. Hacer un ***Deploy***. Es posible que la conexión con el servidor mqtt haya que actualizarla. Si la editamos pone ***localhost*** como servidor mqtt. Hay que cambiarla a ***mosquitto*** que es el nombre del contenedor del servidor mqtt y, gracias a la resolución de nombres que ofrece la red de tipo bridge, podemos resolverlo.
+
+Comprobar en la pestaña ***Alexa*** que los nodos conectan. Si no fuera así, para solucionarlo editar uno de ellos, para poder poner las credenciales (Están en la copia de seguridad de credenciales). Los nodos, después de un momento, deben conectar a la función de AWS.
+
+# Let's Encrypt
+
+Vamos a crear un volumen bind para Let's encrypt. A través de este volumen, podemos generar hacer llegar los certificados digitales al contenedor ***nginx-reverse-proxy***.
+```
+sudo nano $HOME/docker-compose.yml
+```
+
+En el contenedor de nginx, añadir el siguiente volumen bind ***/etc/letsencrypt/:/etc/letsencrypt/***.
+
+El compose debe quedar así:
+```
+version: '3.5'
+
+services:
+
+    # broker MQTT eclipse-mosquitto.
+    mosquitto:
+    build:
+        context: ./mosquitto  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    env_file:
+        - ./mosquitto/environment.env # Archivo con las variables de entorno usuario/password. Editarlo para configurar.
+
+    image: eclipse-mosquitto  # Este es el nombre de la imagen que genera el build.
+
+    container_name: eclipse-mosquitto # Nombre del contenedor que creará el servicio.
+
+    restart: always   # Que siempre se reinicie.
+
+    volumes:
+        - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquito.conf:ro   # Volumen bind para el archivo de configuración.
+        - ./mosquitto/data:/mosquitto/data
+        - ./mosquitto/log:/mosquitto/log
+
+    ports:
+        - 1883:1883
+
+    networks:
+        - container-network
+
+    # node-red
+    node-red:
+    build:
+        context: ./node-red  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: node-red  # Este es el nombre de la imagen que genera el build.
+
+    container_name: node-red  # Nombre del contenedor que creará el servicio.
+
+    restart: always    # Que siempre se reinicie.
+
+    ports:
+        - 1880:1880
+
+    volumes:
+        - node-red-data:/data
 
 
+    networks:
+        - container-network
+
+    depends_on:
+        - mosquitto
+
+
+    # nginx-reverse-proxy
+    nginx-reverse-proxy:
+    build:
+        context: ./nginx-reverse-proxy  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: nginx-reverse-proxy  # Este es el nombre de la imagen que genera el build.
+
+    container_name: nginx-reverse-proxy  # Nombre del contenedor que creará el servicio.
+
+    restart: always  # Que siempre se reinicie.
+
+    ports:
+        - 80:80
+        - 443:443
+
+    networks:
+        - container-network
+
+    volumes:
+        - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+        - /etc/letsencrypt/:/etc/letsencrypt/
+
+    depends_on:
+        - node-red
+
+networks:
+    container-network:
+    name: the-container-network
+    driver: bridge
+
+volumes:
+    node-red-data:
+    name: the-node-red-data
+```	
+	
+Preparamos la raspberry para que pueda pedir (y renovar) certificados a Let's Encrypt. Estos certificados se utilizarán para https en nginx. Instalamos "certbot", el cliente de Let's encrypt.
+```
+sudo apt-get install certbot
+```
+	
+Vamos a usar el plugin en modo ***standalone***". Al ejecutarlo (certbot) arranca un servidor web para la solicitud del certificado. Esto significa que los puertos 80 y 443 deben estar disponibles, así que debemos apagar el servidor nginx, ya que tiene los dos puertos enlazados.
+	
+Además, para la verificación, let's encrypt se conectará al cliente (certbot) que está haciendo de nuestro servidor web (nginx). En la fase de descarga inicial del certificado aún no se puede mover el tráfico por ssl, ya que no hay certificado alguno. Por esta razón, certbot se expone en el puerto 80, así que hay que mapear el tráfico Http (80) en el router hacia 192.168.1.200. Cuando tengamos el certificado, se lo instalaremos a nginx, para proteger las conexiones hacia node-red desde Internet, así que también tenemos que crear una regla de redirección de puerto hacia el 443 de la ip 192.168.1.200. En definitiva, dos mapeos para los puertos 80 y 443 hacia la ip interna 192.168.1.200. 
+(NOTA IMPORTANTE. No puede haber ningún contenedor que tenga mapeado el puerto 80, así que lo mejor es parar todo el servicio?
+```
+sudo docker-compose down
+```	
+
+Vamos a crear el certificado. Se pueden crear certificados para diferentes URL, para ello repetir el parámetro ***-d*** por cada una de ellas.   
+(Nota: Seguir las instrucciones)
+```
+sudo certbot certonly --standalone -d ponerladnscorrecta.dyndns.org
+```
+	
+Observemos la ruta donde se guardan los archivos ***pem***. Luego hará falta usarlas.
+
+![Ruta pem](./img/202212222104.png)
+	
+La autoridad certificadora de Let's Encrypt entrega certificados de corta vida, solo son válidos por 90 días. Esto hace que sea importante el proceso de renovación automático. Certbot lo hace fácil por medio del comando ***certbot renew***, que comprueba los certificados instalados y renueva aquellos que expirarán en menos de 30 días.
+
+Vamos a usar el mismo plugin para la renovación que usamos para pedir el certificado, el plugin standalone. Para el proceso de renovación, los puerto 80 o 443 deben estar libres.
+
+Certbot proporciona ***hooks*** antes y después del procedimiento de renovación, que usaremos para detener y arrancar el servidor web (nginx) durante la renovación, con la idea de liberar los puertos.
+
+Los ***hooks*** se ejecutan solo cuando el certificado necesita ser renovado, de esta forma no hay downtime innecesario.
+
+El comando docker-compose es el siguiente:
+```
+	sudo certbot renew --pre-hook "docker-compose -f $HOME/docker-compose.yml down" --post-hook "docker-compose -f $HOME/docker-compose.yml up -d"
+```
+	
+Como se puede ver en la siguiente imagen, si se fuerza la renovación del certificado, pero no estamos en el periodo de validación, entonces no se hace nada (skipped)
+
+![Skipped](./img/202212222107.png)
+	
+Necesitamos que este procedimiento se realice son frecuencia, así que usamos crontab
+```
+sudo crontab -e
+```
+
+Elegir ***nano***, Escribir estas dos líneas al final y guardar.
+```
+@weekly sudo certbot renew --pre-hook "docker-compose -f $HOME/docker-compose.yml down" --post-hook "docker-compose -f $HOME/docker-compose.yml up -d"
+@daily service nginx reload
+```
+
+Hasta el momento los certificados son solicitados y almacenados en raspbian. Ahora necesitamos proporcionárselos a nginx. La primera parte ya está configurada y consistía en crear un volumen bind para let's encrypt en el contenedor nginx. Esta configuración  ya se encuentra en el compose.
+```
+   volumes:
+     - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+     - /etc/letsencrypt/:/etc/letsencrypt/
+```
+
+Por defecto, un servidor virtual escucha en el puerto 80 y ahora tenemos que hacer que escuche en el 443, esto se hace por directivas ***listen***. Además el certificado debe estar definido y lo configuraremos con las directivas ***ssl_certificate*** y ***ssl_certificate_key***. Editamos el archivo de configuración de nginx.
+```
+sudo nano nginx-reverse-proxy/nginx.conf
+```
+
+Debe quedar de la siguiente forma.
+(Nota: Sustituir el anterior)
+```
+worker_processes 1;
+
+events { worker_connections 1024; }
+
+http {
+
+    sendfile on;
+
+    server {
+        listen 80;
+
+        listen 443 ssl;
+        ssl_certificate /etc/letsencrypt/live/ponerladnscorrecta.dyndns.org/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/ponerladnscorrecta.dyndns.org/privkey.pem;
+
+        location / {
+            proxy_ssl_session_reuse         on;
+            proxy_pass                      http://node-red:1880;  #  Aprovechamos la resolución de nombres 
+            proxy_http_version              1.1;
+            proxy_set_header                Upgrade        $http_upgrade;
+            proxy_set_header                Connection     "upgrade";
+            proxy_redirect                  default;
+            proxy_read_timeout              90;
+        }
+    }
+}
+```
+	
+Arrancamos nuestro stack
+```
+sudo docker-compose up -d
+```
+
+Conectamos con un navegador a https://ponerladnscorrecta.dyndns.org/ui y vemos si funciona.
+
+
+
+	
