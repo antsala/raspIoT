@@ -37,4 +37,82 @@ Y realizamos lo siguiente.
 
 ![Habilitar SSH](./img/202212221948.png)
 
+De nuevo, si no estamos en la aplicación, ejecutamos ***raspi-config***.
+```
+sudo raspi-config
+```
+
+Y como no tenemos interfaz gráfica reducimos la RAM asignada a ella. Hacemos.
+
+![RAM 32MB](./img/202212221951.png)
+
+Actualizamos la pi
+```
+sudo apt-get update
+```
+```
+sudo apt-get upgrade
+```
+
+## Instalar Docker.
+
+Instalamos los prerrequisitos.
+```
+sudo apt install -y  apt-transport-https ca-certificates curl gnupg2 software-properties-common
+```
+
+Instalar la clave GPG de Docker.
+```
+curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg | sudo apt-key add -
+```
+
+Añadir los repositorios oficiales de Docker
+```
+echo "deb [arch=armhf] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+```
+
+Instalamos Docker
+```
+sudo apt update
+```
+```
+sudo apt install -y docker-ce 
+```
+
+Hacer que Docker arranque al inicio
+```
+sudo systemctl enable docker
+```
+```
+sudo systemctl start docker
+```
+
+Añadir al usuario "pi" al grupo "docker"
+```
+sudo usermod -aG docker pi  
+```
+
+Hacemos logout y login para actualizar.
+	
+Instalar Docker compose usando pip
+
+```
+sudo apt update
+```
+```
+sudo apt-get install build-essential libssl-dev libffi-dev python3-dev
+```
+```
+sudo apt install -y python python-pip
+```
+sudo pip install docker-compose
+```
+	
+Probar docker
+```	
+docker run -rm hello-world
+```
+
+	
+
 
