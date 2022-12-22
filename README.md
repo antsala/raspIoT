@@ -141,7 +141,8 @@ Muestra los contenedores levantados. La infraestructura debe esta levantada.
 docker container ls   
 ```
 
-Si quieres ver como se generan desde cero todo, o entender al detalle cómo funciona, mira el archivo ***Despliegue_desde_cero.md***
+Si quieres ver como se generan desde cero todo, o entender al detalle cómo funciona, mira este archivo:
+[Despliegue desde cero](Despliegue_desde_cero.md)
 
 
 
