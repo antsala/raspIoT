@@ -775,8 +775,368 @@ Arrancamos nuestro stack
 sudo docker-compose up -d
 ```
 
-Conectamos con un navegador a https://<poner_la_dns_correcta>/ui y vemos si funciona.
+Conectamos con un navegador a https://poner_la_dns_correcta/ui y vemos si funciona.
 
+Hasta aquí todo correcto. Desde Internet montamos un túnel SSL hasta nginx, pero no hay autenticación con node-red y cualquiera podría acceder al servidor. Lo que vamos a hacer es configurar node-red para que exija autenticación.
 
+Esto se hace en el archivo de configuración ***settings.js***. Este archivo se almacena en un volumen con nombre llamado ***the-node-red-data***, para editarlo, primero nos aseguramos que el contenedor no está corriendo:
+```
+docker-compose down
+```
+
+La ruta del archivo de configuración es ***/var/lib/docker/volumes/the-node-red-data/_data/settings.js***. La usaremos en un momento para editar dicho archivo.
+
+Suponemos que ya hemos cambiado el password por defecto de la raspberry. Esto debe hacerse al instalar raspbian, ya que este password es conocido por la comunidad.
+
+Hay tres credenciales que debemos conocer (y su password cambiar) en node-red: ***node-red admin***, permite acceder al editor de node-red. ***node-red http and flow***, que se utiliza para autenticar las requests de HTTP, por ejemplo a la interfaz gráfica /ui. ***node-red static auth***, que se utiliza en la autenticación del contenido estático como las páginas web hospedadas (esta última credencial es opcional de configurar y no la pondremos)
+
+En el archivo de configuración debemos poner los hashes (y no las contraseñas) de estas credenciales, por lo que nos hará falta una herramienta para generarlos (***node-red-admin***)
+
+Instalamos el gestor de paquetes de node ***npm***
+```
+sudo apt install npm
+```
+
+Instalamos la herramienta
+```
+sudo npm install -g node-red-admin
+```
+
+Ahora generamos los hashes
+```
+sudo node-red-admin hash-pw (Ponemos un password y copiamos al portapapeles el hash generado)
+```	
+	
+Editamos el archivo de configuración ***settings.js***
+```
+sudo nano /var/lib/docker/volumes/the-node-red-data/_data/settings.js
+```
+En nano buscar (Ctrl+W) y buscar ***adminAuth***. Quitar todos los comentarios del bloque y sustituir el hash que aparece por el que hemos copiado previamente.
+
+Luego buscar (Ctrl+W) y buscar ***httpNodeAuth***. Quitar los comentarios para habilitar esta credencial, sustituir ***user*** por el usuario que deseemos, por ejemplo ***admin***, y pegar el hash del password que copiamos anteriormente.
+
+Guardamos Ctrl+X, Y, Enter y arrancamos el stack
+```
+docker-compose up -d
+```
+
+Ahora, al conectar con nodered, aparece el diálogo de autenticación.
 
 	
+    
+##SERVICIO UPDATE_DNS (CON AZURE FUNCTIONS)
+
+Crear el contexto de Dockerfile para mosquitto.
+```
+sudo mkdir $HOME/updateDNSAzureFunctions
+``` 
+	
+En el directorio ***updateDNSAzureFunctions***, crear un archivo llamado ***updatePublicIP.sh*** y editarlo. Este script será ejecutado cuando se cree la imagen del contenedor.
+```
+cd $HOME/updateDNSAzureFunctions
+```
+``` 
+sudo nano update_public_ip.sh
+```
+
+Pegar el siguiente contenido en el archivo
+```
+#!/bin/bash
+
+set -e
+
+REQIP="$(curl icanhazip.com)"
+
+#echo "URL=$URL"
+#echo "code=$CODE"
+#echo "name=$NAME"
+#echo "zone=$ZONE"
+#echo "La IP publica es:$REQIP"
+
+URI="$URL?code=$CODE&name=$NAME&zone=$ZONE&reqIP=$REQIP"
+
+echo "$URI"
+
+curl -X POST $URI -d ""
+
+exec "$@"
+```
+
+Guardarlo (Ctrl+X, Y, Enter)
+
+Ahora lo hacemos ejecutable
+```
+sudo chmod 755 update_public_ip.sh
+```	
+
+Creamos un archivo para almacenar variables de entorno. Este archivo se llamará ***environment.env***. Posteriormente recuperaremos los valores con ***${clave}*** en el archivo compose. Estas variables son tomadas de la URL de llamada a la Azure Function.
+```
+sudo nano environment.env
+```
+
+Y pegamos el siguiente texto
+```
+URL=https://antsalaupdatedns.azurewebsites.net/api/doUpdate
+CODE=x33XYR3aS7maofEPBgmkyKa3K12622l4jAZ37Mihte9u0tJIQTMgOQ==
+NAME=sevilla
+ZONE=antsala.xyz
+```
+
+Voy a crear un script ***loop.sh*** para que lance una actualización al iniciar el contenedor, asegure iniciar el servicio cron y luego entre en bucle infinito para que el contenedor no se pare.
+```
+sudo nano loop.sh
+```	
+Pegar este texto. Ojo, cuando cron llama al script su contexto es diferente, por lo tanto no ve las variables de entorno que se le pasan al contenedor. Usamos un truco consistente en exportar las variables a un script (***cron_env.sh***)que luego se carga al ejecutar cron. Ver Access environment variables from crontab into a docker container – Yannick Pereira-Reis (ypereirareis.github.io)
+```
+#!/bin/bash
+
+# Hago una llamada inicial a la actualización de la IP. Las posteriores actualizaciones  será llamadas por cron
+/update_public_ip.sh
+
+# Paso las variables de entorno al contexto de cron mediante un truco.
+# creo un  script con la exportación de las variables. Este script es ejecutado
+# por cron cada vez que lanza el script principal.
+printenv | sed 's/^\(.*\)$/export \1/g' > /cron_env.sh
+
+# Inicio el servicio cron
+service cron start
+
+echo
+
+# Ahora entro en bucle infinito para que no se pare el contenedor.
+while :
+do
+        echo "En bucle infinito para que no se pare el contenedor"
+        sleep 300
+done
+```	
+
+Hacerlo ejecutable
+```	
+sudo chmod 755 loop.sh
+```	
+	
+Ahora creo la configuración de cron para que se llame al script cada hora.
+```	
+sudo nano update-cron
+```
+
+Pegar este contenido: Se llama al script cada hora. Notar como se llama a ***cron_env.sh*** para hacer accesible las variables de entorno del contenedor al contexto de cron.
+```
+0 * * * * . /cron_env.sh; /update_public_ip.sh >> /cron.log 2>&1
+# An empty line is required at the end of this file for a valid cron file.
+```
+
+Creamos el Dockerfile para crear la imagen del updater
+```
+sudo nano Dockerfile
+```
+
+Y pegamos el siguiente texto. ***update-cron*** tiene la configuración de cron para llamar al script ***update-public-ip.sh*** cada hora. la línea RUN lo agrega a crontab. ENTRYPOINT mete al contenedor en un bucle infinito para que no se pare.
+```
+FROM ubuntu:18.04
+RUN apt-get update; apt-get install -y curl
+RUN apt-get -y install cron
+COPY update-cron /
+COPY update_public_ip.sh /
+COPY loop.sh /
+RUN /usr/bin/crontab /update-cron
+CMD ["/bin/bash", "-c", "/loop.sh"]
+```
+	
+Modificamos Compose para incluir el nuevo servicio ( y retirar el antiguo servicio DYNDNS)
+```	
+sudo nano docker-compose.yml
+```	
+(Nota: He comentado el servicio DYNDNS, que ya no lo uso)
+```
+# ddclient (Cliente de DynDns)
+    #ddclient:
+    #  image: linuxserver/ddclient
+    #
+    #  container_name: ddclient
+    #
+    #  environment:
+    #    - PUID=1000
+    #    - PGID=1000
+    #    - TZ=Europe/Madrid
+    #
+    #  restart: always   # Que siempre se reinicie.
+    #
+    #  volumes:
+    #    - ./ddclient:/config:ro   # Volumen bind para el archivo de configuración.
+    #
+    #  networks:
+    #    - container-network
+```
+
+El nuevo servicio updater debe quedar así.
+```
+# updater_public_ip
+updater_public_ip:
+build:
+    context: ./updateDNSAzureFunctions
+
+env_file:
+    - ./updateDNSAzureFunctions/environment.env # archivo con las variables de entorno. Editarlo para configurar.
+
+image: antsala/updater_public_ip
+
+container_name: updater
+
+restart:  always
+
+networks:
+    - container-network
+```
+
+Para evitar confusiones. La versión final del archivo compose es esta:
+```
+version: '3.5'
+services:
+  # broker MQTT eclipse-mosquitto.
+  mosquitto:
+    build:
+      context: ./mosquitto  # indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    env_file:
+      - ./mosquitto/environment.env # archivo con las variables de entorno usuario/password. Editarlo para configurar.
+
+    image: eclipse-mosquitto  # Este es el nombre de la imagen que genera el build.
+
+    container_name: eclipse-mosquitto # Nombre del contenedor que creará el servicio.
+
+    restart: always   # Que siempre se reinicie.
+
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquito.conf:ro   # Volumen bind para el archivo de configuración.
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+    ports:
+      - 1883:1883
+
+    networks:
+      - container-network
+
+  # node-red
+  node-red:
+    build:
+      context: ./node-red  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: node-red # Este es el nombre de la imagen que genera el build.
+
+    container_name: node-red  # Nombre del contenedor que creará el servicio.
+
+    restart: always    # Que siempre se reinicie.
+
+    ports:
+      - 1880:1880
+
+    volumes:
+      - node-red-data:/data
+
+    networks:
+      - container-network
+
+    depends_on:
+      - mosquitto
+
+
+  # nginx-reverse-proxy
+  nginx-reverse-proxy:
+    build:
+      context: ./nginx-reverse-proxy  # Indicamos donde está el contexto del Dockerfile para generar la imagen.
+
+    image: nginx-reverse-proxy  # Este es el nombre de la imagen que genera el build.
+
+    container_name: nginx-reverse-proxy  # Nombre del contenedor que creará el servicio.
+
+    restart: always  # Que siempre se reinicie.
+
+    ports:
+      - 80:80
+      - 443:443
+
+    networks:
+      - container-network
+
+    volumes:
+      - ./nginx-reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt/:/etc/letsencrypt/
+
+    depends_on:
+      - node-red
+
+  # ddclient (Cliente de DynDns)
+  #ddclient:
+  #  image: linuxserver/ddclient
+  #
+  #  container_name: ddclient
+  #
+  #  environment:
+  #    - PUID=1000
+  #    - PGID=1000
+  #    - TZ=Europe/Madrid
+  #
+  #  restart: always   # Que siempre se reinicie.
+  #
+  #  volumes:
+  #    - ./ddclient:/config:ro   # Volumen bind para el archivo de configuración.
+  #
+  #  networks:
+  #    - container-network
+  
+
+  # updater_public_ip
+  updater_public_ip:
+    build:
+      context: ./updateDNSAzureFunctions
+
+    env_file:
+      - ./updateDNSAzureFunctions/environment.env # archivo con las variables de entorno. Editarlo para configurar.
+
+    image: antsala/updater_public_ip 
+
+    container_name: updater
+
+    restart:  always
+
+    networks:
+      - container-network
+
+
+networks:
+  container-network:
+    name: the-container-network
+    driver: bridge
+
+volumes:
+    node-red-data:
+      name: the-node-red-data
+```
+
+Iniciamos todos los servicios convenientemente.
+```	
+cd $HOME
+```
+
+Paramos todos los servicios.
+```
+sudo docker-compose stop  
+```
+
+Se ejecuta sección "build" de "docker-compose.yml", que generará las imágenes.
+```
+sudo docker-compose build 
+```
+
+Crea el stack o pila de servicios
+```
+sudo docker-compose up -d
+```
+
+Muestra los contenedores levantados.
+```
+sudo docker container ls   
+```
