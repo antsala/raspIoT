@@ -824,7 +824,7 @@ Ahora, al conectar con nodered, aparece el diálogo de autenticación.
 
 	
     
-##SERVICIO UPDATE_DNS (CON AZURE FUNCTIONS)
+## SERVICIO UPDATE_DNS (CON AZURE FUNCTIONS)
 
 Crear el contexto de Dockerfile para mosquitto.
 ```
